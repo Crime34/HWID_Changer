@@ -1,0 +1,12 @@
+# HWID Manager - Dépendances Python
+# Aucune dépendance externe requise
+# Le programme utilise uniquement des bibliothèques standard Python:
+# - tkinter (interface graphique)
+# - winreg (registre Windows)
+# - subprocess (commandes système)
+# - uuid (génération d'identifiants)
+# - hashlib (hachage)
+# - platform (informations système)
+
+# Note: tkinter est inclus par défaut avec Python sur Windows
+# Si tkinter n'est pas disponible, installer Python depuis python.org
