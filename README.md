@@ -28,9 +28,10 @@ La modification du HWID peut:
 ### Modifications Disponibles
 - ✅ Modifier le Machine GUID
 - ✅ Modifier le Product ID Windows
+- ✅ Modifier l'adresse MAC (spoofing automatique)
 - ✅ Générer de nouveaux identifiants aléatoires
-- ✅ Sauvegarder/Restaurer les clés de registre
-- ℹ️ Instructions pour modifier l'adresse MAC
+- ✅ Sauvegarder les clés de registre
+- ✅ Restaurer les clés de registre depuis une sauvegarde
 
 ## 🚀 Installation
 
@@ -103,14 +104,33 @@ manager.modify_machine_guid()
 manager.modify_machine_guid("12345678-1234-1234-1234-123456789012")
 ```
 
-### 3. Sauvegarder le Registre
+### 3. Modifier l'Adresse MAC
+
+```python
+# Modification automatique (sélection interactive)
+manager.spoof_mac_address()
+
+# MAC personnalisée
+manager.spoof_mac_address(adapter_name="Ethernet", new_mac="02:11:22:33:44:55")
+```
+
+**Note**: L'adaptateur réseau sera redémarré automatiquement pour appliquer les changements.
+
+### 4. Sauvegarder le Registre
 
 ```python
 # Créer une sauvegarde avant modification
 manager.backup_registry_keys("backup.reg")
 ```
 
-### 4. Générer un HWID Composite
+### 5. Restaurer le Registre
+
+```python
+# Restaurer depuis une sauvegarde
+manager.restore_registry_keys("backup.reg")
+```
+
+### 6. Générer un HWID Composite
 
 ```python
 hwid = manager.generate_composite_hwid()
@@ -164,6 +184,14 @@ python hwid_manager.py
 Pour restaurer une sauvegarde:
 
 ```bash
+# Via l'interface (Recommandé)
+Menu > Restaurer Registre (Option 6)
+
+# Via console
+python hwid_manager.py
+# Choisir option 6
+
+# Manuellement
 # Double-cliquer sur le fichier .reg
 # OU
 reg import hwid_backup.reg
@@ -246,8 +274,11 @@ hwid/
 
 ### L'adresse MAC ne change pas
 **Solution**: 
-- Certaines cartes réseau ne supportent pas le changement MAC
-- Utiliser des outils dédiés (TMAC, Technitium MAC Address Changer)
+1. Vérifier que le programme est exécuté en tant qu'administrateur
+2. Redémarrer manuellement l'adaptateur réseau
+3. Certaines cartes réseau virtuelles peuvent ne pas supporter le changement
+4. Vérifier dans les propriétés de l'adaptateur (Gestionnaire de périphériques)
+5. En dernier recours, utiliser des outils dédiés (TMAC, Technitium MAC Address Changer)
 
 ### Le GUID revient à l'ancienne valeur
 **Solution**: 
@@ -291,6 +322,13 @@ Ce projet est fourni "tel quel" sans garantie d'aucune sorte.
 Créé à des fins éducatives et de recherche.
 
 ## 🔄 Changelog
+
+### Version 1.1 (2026-01-31)
+- ✅ Modification automatique de l'adresse MAC via registre
+- ✅ Restauration des clés de registre depuis une sauvegarde
+- ✅ Sélection interactive des adaptateurs réseau
+- ✅ Redémarrage automatique des adaptateurs après modification MAC
+- ✅ Génération automatique d'adresses MAC valides
 
 ### Version 1.0 (2026-01-31)
 - ✅ Interface console complète
