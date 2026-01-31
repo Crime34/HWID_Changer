@@ -227,9 +227,33 @@ class HWIDManager:
             print(f"❌ Erreur lors de la modification: {str(e)}")
             return False
     
-    def spoof_mac_address(self, interface_name: str, new_mac: Optional[str] = None) -> bool:
+    def get_network_adapters(self) -> List[Dict[str, str]]:
+        """Récupère la liste des adaptateurs réseau"""
+        try:
+            ps_command = """
+            Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object Name, InterfaceDescription, MacAddress | ConvertTo-Json
+            """
+            result = subprocess.run(
+                ['powershell', '-Command', ps_command],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                import json
+                adapters = json.loads(result.stdout)
+                if isinstance(adapters, dict):
+                    adapters = [adapters]
+                return adapters
+            return []
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération des adaptateurs: {str(e)}")
+            return []
+    
+    def spoof_mac_address(self, adapter_name: str = None, new_mac: Optional[str] = None) -> bool:
         """
-        Modifie l'adresse MAC d'une interface réseau
+        Modifie l'adresse MAC d'une interface réseau via le registre
         ATTENTION: Nécessite des privilèges administrateur
         """
         if not self.is_admin():
@@ -237,20 +261,126 @@ class HWIDManager:
             return False
         
         try:
+            # Si aucun adaptateur spécifié, lister les adaptateurs disponibles
+            if adapter_name is None:
+                adapters = self.get_network_adapters()
+                if not adapters:
+                    print("❌ Aucun adaptateur réseau actif trouvé")
+                    return False
+                
+                print("\n📡 Adaptateurs réseau disponibles:")
+                for i, adapter in enumerate(adapters, 1):
+                    print(f"{i}. {adapter.get('Name', 'N/A')} - MAC: {adapter.get('MacAddress', 'N/A')}")
+                
+                choice = input("\nChoisir un adaptateur (numéro): ").strip()
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(adapters):
+                        adapter_name = adapters[idx]['Name']
+                    else:
+                        print("❌ Choix invalide")
+                        return False
+                except ValueError:
+                    print("❌ Entrée invalide")
+                    return False
+            
+            # Générer une nouvelle MAC si non fournie
             if new_mac is None:
-                # Génère une adresse MAC aléatoire
-                new_mac = ':'.join(['{:02x}'.format(uuid.uuid4().int >> elements & 0xff)
-                                   for elements in range(0, 2*6, 2)])
+                # Générer une MAC aléatoire (en gardant le bit local pour éviter les conflits)
+                import random
+                new_mac = "02:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}".format(
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                    random.randint(0, 255)
+                )
             
-            # Commande pour modifier l'adresse MAC (méthode Windows)
-            mac_no_colons = new_mac.replace(':', '')
+            # Nettoyer le format MAC (enlever : et -)
+            mac_clean = new_mac.replace(':', '').replace('-', '').upper()
             
-            # Cette méthode nécessite des outils supplémentaires ou des scripts PowerShell
-            print(f"⚠️ Pour modifier l'adresse MAC, utilisez:")
-            print(f"   Gestionnaire de périphériques > Propriétés de la carte réseau")
-            print(f"   Nouvelle MAC: {new_mac}")
+            if len(mac_clean) != 12:
+                print(f"❌ Format MAC invalide: {new_mac}")
+                return False
             
-            return True
+            # Trouver la clé de registre de l'adaptateur
+            ps_find_adapter = f"""
+            $adapter = Get-NetAdapter | Where-Object {{$_.Name -eq '{adapter_name}'}}
+            if ($adapter) {{
+                $guid = $adapter.InterfaceGuid
+                Write-Output $guid
+            }}
+            """
+            
+            result = subprocess.run(
+                ['powershell', '-Command', ps_find_adapter],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode != 0 or not result.stdout.strip():
+                print(f"❌ Impossible de trouver l'adaptateur: {adapter_name}")
+                return False
+            
+            adapter_guid = result.stdout.strip()
+            
+            # Modifier le registre
+            reg_path = f"SYSTEM\\CurrentControlSet\\Control\\Class\\{{4D36E972-E325-11CE-BFC1-08002BE10318}}"
+            
+            # Chercher la sous-clé correspondant à l'adaptateur
+            ps_modify = f"""
+            $regPath = "HKLM:\\{reg_path}"
+            $found = $false
+            
+            Get-ChildItem $regPath | ForEach-Object {{
+                $key = $_
+                $netCfgInstanceId = (Get-ItemProperty -Path $key.PSPath -Name "NetCfgInstanceId" -ErrorAction SilentlyContinue).NetCfgInstanceId
+                
+                if ($netCfgInstanceId -eq "{adapter_guid}") {{
+                    Set-ItemProperty -Path $key.PSPath -Name "NetworkAddress" -Value "{mac_clean}"
+                    $found = $true
+                    Write-Output "SUCCESS"
+                }}
+            }}
+            
+            if (-not $found) {{
+                Write-Output "NOT_FOUND"
+            }}
+            """
+            
+            result = subprocess.run(
+                ['powershell', '-Command', ps_modify],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if "SUCCESS" in result.stdout:
+                # Redémarrer l'adaptateur réseau
+                print(f"✅ Adresse MAC modifiée: {new_mac}")
+                print("🔄 Redémarrage de l'adaptateur réseau...")
+                
+                restart_cmd = f"""
+                Disable-NetAdapter -Name '{adapter_name}' -Confirm:$false
+                Start-Sleep -Seconds 2
+                Enable-NetAdapter -Name '{adapter_name}' -Confirm:$false
+                """
+                
+                subprocess.run(
+                    ['powershell', '-Command', restart_cmd],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                print("✅ Adaptateur redémarré avec succès!")
+                print("ℹ️  Vérifiez la nouvelle adresse MAC avec l'option 1 du menu")
+                return True
+            else:
+                print(f"❌ Impossible de modifier l'adresse MAC")
+                return False
+                
         except Exception as e:
             print(f"❌ Erreur: {str(e)}")
             return False
@@ -380,7 +510,7 @@ def main():
         print("1. Afficher toutes les informations HWID")
         print("2. Modifier le Machine GUID")
         print("3. Modifier le Product ID")
-        print("4. Informations sur le spoofing MAC")
+        print("4. Modifier l'adresse MAC")
         print("5. Sauvegarder les clés de registre")
         print("6. Restaurer les clés de registre depuis une sauvegarde")
         print("7. Générer un nouveau HWID composite")
@@ -410,12 +540,10 @@ def main():
             manager.modify_product_id(new_id)
         
         elif choice == "4":
-            print("\n🌐 SPOOFING D'ADRESSE MAC")
-            print("Pour modifier l'adresse MAC:")
-            print("1. Ouvrir le Gestionnaire de périphériques")
-            print("2. Cartes réseau > Propriétés")
-            print("3. Avancé > Adresse réseau")
-            print(f"4. Entrer une nouvelle adresse (ex: {manager.get_mac_address()})")
+            print("\n🌐 MODIFICATION DE L'ADRESSE MAC")
+            custom_mac = input("Entrer une adresse MAC personnalisée (ou appuyez sur Entrée pour auto): ").strip()
+            new_mac = custom_mac if custom_mac else None
+            manager.spoof_mac_address(new_mac=new_mac)
         
         elif choice == "5":
             print("\n💾 SAUVEGARDE DES CLÉS DE REGISTRE")
